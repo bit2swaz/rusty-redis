@@ -14,7 +14,7 @@ use tracing_subscriber::FmtSubscriber;
 #[tokio::main]
 async fn main() {
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
+        .with_max_level(Level::DEBUG)
         .finish();
 
     tracing::subscriber::set_global_default(subscriber)
@@ -51,8 +51,9 @@ async fn main() {
                                 info!("parsed command: {:?}", command);
                                 match command {
                                     Command::Ping => Frame::Simple("PONG".to_string()),
-                                    Command::Set { key, value } => {
-                                        db.set(key, value);
+                                    Command::Set { key, value, expiry_seconds } => {
+                                        let duration = expiry_seconds.map(std::time::Duration::from_secs);
+                                        db.set(key, value, duration);
                                         Frame::Simple("OK".to_string())
                                     }
                                     Command::Get { key } => {

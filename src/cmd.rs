@@ -4,7 +4,7 @@ use crate::frame::Frame;
 #[derive(Debug)]
 pub enum Command {
     Get { key: String },
-    Set { key: String, value: Bytes },
+    Set { key: String, value: Bytes, expiry_seconds: Option<u64> },
     Ping,
 }
 
@@ -54,9 +54,9 @@ pub fn from_frame(frame: Frame) -> Result<Command, ParseError> {
                     Ok(Command::Get { key })
                 }
                 "SET" => {
-                    if frames.len() != 3 {
+                    if frames.len() < 3 {
                         return Err(ParseError::InvalidFormat(
-                            "SET requires exactly 2 arguments".to_string()
+                            "SET requires at least 2 arguments".to_string()
                         ));
                     }
 
@@ -70,7 +70,38 @@ pub fn from_frame(frame: Frame) -> Result<Command, ParseError> {
                         _ => return Err(ParseError::InvalidFormat("value must be bulk string".to_string())),
                     };
 
-                    Ok(Command::Set { key, value })
+                    let mut expiry_seconds = None;
+                    let mut i = 3;
+                    while i < frames.len() {
+                        match &frames[i] {
+                            Frame::Bulk(option) => {
+                                let option_str = String::from_utf8_lossy(option).to_uppercase();
+                                match option_str.as_str() {
+                                    "EX" => {
+                                        if i + 1 >= frames.len() {
+                                            return Err(ParseError::InvalidFormat(
+                                                "EX requires a value".to_string()
+                                            ));
+                                        }
+                                        match &frames[i + 1] {
+                                            Frame::Bulk(seconds) => {
+                                                let seconds_str = String::from_utf8_lossy(seconds);
+                                                expiry_seconds = Some(seconds_str.parse::<u64>().map_err(|_| {
+                                                    ParseError::InvalidFormat("EX value must be an integer".to_string())
+                                                })?);
+                                                i += 2;
+                                            }
+                                            _ => return Err(ParseError::InvalidFormat("EX value must be a bulk string".to_string())),
+                                        }
+                                    }
+                                    _ => return Err(ParseError::InvalidFormat(format!("unknown option '{}'", option_str))),
+                                }
+                            }
+                            _ => return Err(ParseError::InvalidFormat("option must be bulk string".to_string())),
+                        }
+                    }
+
+                    Ok(Command::Set { key, value, expiry_seconds })
                 }
                 _ => Err(ParseError::InvalidCommand(format!("unknown command '{}'", cmd_name))),
             }
