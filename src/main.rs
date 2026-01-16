@@ -1,8 +1,12 @@
 mod frame;
 mod connection;
+mod db;
+mod cmd;
 
 use connection::Connection;
 use frame::Frame;
+use db::Db;
+use cmd::Command;
 use tokio::net::TcpListener;
 use tracing::{error, info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -17,6 +21,7 @@ async fn main() {
         .expect("failed to set tracing subscriber");
 
     let addr = "127.0.0.1:6379";
+    let db = Db::new();
 
     let listener = match TcpListener::bind(addr).await {
         Ok(listener) => {
@@ -32,6 +37,7 @@ async fn main() {
     loop {
         match listener.accept().await {
             Ok((socket, peer_addr)) => {
+                let db = db.clone();
                 tokio::spawn(async move {
                     info!("accepted connection from: {}", peer_addr);
 
@@ -40,20 +46,27 @@ async fn main() {
                     while let Ok(Some(frame)) = connection.read_frame().await {
                         info!("received frame: {:?}", frame);
 
-                        let response = match frame {
-                            Frame::Array(ref frames) if !frames.is_empty() => {
-                                match &frames[0] {
-                                    Frame::Bulk(cmd) => {
-                                        let cmd_str = String::from_utf8_lossy(cmd).to_uppercase();
-                                        match cmd_str.as_str() {
-                                            "PING" => Frame::Simple("PONG".to_string()),
-                                            _ => Frame::Error(format!("ERR unknown command '{}'", cmd_str)),
+                        let response = match cmd::from_frame(frame) {
+                            Ok(command) => {
+                                info!("parsed command: {:?}", command);
+                                match command {
+                                    Command::Ping => Frame::Simple("PONG".to_string()),
+                                    Command::Set { key, value } => {
+                                        db.set(key, value);
+                                        Frame::Simple("OK".to_string())
+                                    }
+                                    Command::Get { key } => {
+                                        match db.get(&key) {
+                                            Some(value) => Frame::Bulk(value),
+                                            None => Frame::Null,
                                         }
                                     }
-                                    _ => Frame::Error("ERR invalid command format".to_string()),
                                 }
                             }
-                            _ => Frame::Error("ERR invalid command format".to_string()),
+                            Err(e) => {
+                                error!("parse error: {}", e);
+                                Frame::Error(format!("ERR {}", e))
+                            }
                         };
 
                         if let Err(e) = connection.write_frame(&response).await {

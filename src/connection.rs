@@ -21,16 +21,13 @@ impl Connection {
 
     pub async fn read_frame(&mut self) -> Result<Option<Frame>, std::io::Error> {
         loop {
-            // Try to parse a frame from the existing buffer
             if let Some(frame) = parse_frame(&mut self.buffer)? {
                 return Ok(Some(frame));
             }
 
-            // Read more data from the socket
             let n = self.stream.read_buf(&mut self.buffer).await?;
 
             if n == 0 {
-                // Connection closed
                 if self.buffer.is_empty() {
                     return Ok(None);
                 } else {
@@ -91,7 +88,6 @@ fn serialize_frame(frame: &Frame, buf: &mut BytesMut) {
 }
 
 fn parse_frame(buf: &mut BytesMut) -> Result<Option<Frame>, std::io::Error> {
-    // Check if we have at least one byte to read
     if buf.is_empty() {
         return Ok(None);
     }
@@ -126,7 +122,7 @@ fn parse_frame(buf: &mut BytesMut) -> Result<Option<Frame>, std::io::Error> {
                 let len = len as usize;
 
                 if cursor.remaining() < len + 2 {
-                    return Ok(None); // wait for more data
+                    return Ok(None);
                 }
 
                 let start = cursor.position() as usize;
@@ -134,7 +130,7 @@ fn parse_frame(buf: &mut BytesMut) -> Result<Option<Frame>, std::io::Error> {
 
                 let data = Bytes::copy_from_slice(&buf[start..end]);
 
-                cursor.set_position((end + 2) as u64); // skip \r\n
+                cursor.set_position((end + 2) as u64);
 
                 Frame::Bulk(data)
             }
