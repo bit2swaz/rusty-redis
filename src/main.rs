@@ -1,3 +1,8 @@
+mod frame;
+mod connection;
+
+use connection::Connection;
+use frame::Frame;
 use tokio::net::TcpListener;
 use tracing::{error, info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -29,8 +34,35 @@ async fn main() {
             Ok((socket, peer_addr)) => {
                 tokio::spawn(async move {
                     info!("accepted connection from: {}", peer_addr);
-                    
-                    let _ = socket;
+
+                    let mut connection = Connection::new(socket);
+
+                    while let Ok(Some(frame)) = connection.read_frame().await {
+                        info!("received frame: {:?}", frame);
+
+                        let response = match frame {
+                            Frame::Array(ref frames) if !frames.is_empty() => {
+                                match &frames[0] {
+                                    Frame::Bulk(cmd) => {
+                                        let cmd_str = String::from_utf8_lossy(cmd).to_uppercase();
+                                        match cmd_str.as_str() {
+                                            "PING" => Frame::Simple("PONG".to_string()),
+                                            _ => Frame::Error(format!("ERR unknown command '{}'", cmd_str)),
+                                        }
+                                    }
+                                    _ => Frame::Error("ERR invalid command format".to_string()),
+                                }
+                            }
+                            _ => Frame::Error("ERR invalid command format".to_string()),
+                        };
+
+                        if let Err(e) = connection.write_frame(&response).await {
+                            error!("failed to write response: {}", e);
+                            break;
+                        }
+                    }
+
+                    info!("connection closed from: {}", peer_addr);
                 });
             }
             Err(e) => {
