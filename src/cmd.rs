@@ -8,6 +8,7 @@ pub enum Command {
     Ping,
     Subscribe { channel: String },
     Publish { channel: String, message: Bytes },
+    Save,
 }
 
 #[derive(Debug)]
@@ -137,6 +138,14 @@ pub fn from_frame(frame: Frame) -> Result<Command, ParseError> {
                     };
 
                     Ok(Command::Publish { channel, message })
+                }
+                "SAVE" => {
+                    if frames.len() != 1 {
+                        return Err(ParseError::InvalidFormat(
+                            "SAVE takes no arguments".to_string()
+                        ));
+                    }
+                    Ok(Command::Save)
                 }
                 _ => Err(ParseError::InvalidCommand(format!("unknown command '{}'", cmd_name))),
             }

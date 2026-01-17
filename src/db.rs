@@ -7,7 +7,7 @@ use tracing::debug;
 
 #[derive(Clone)]
 pub struct Db {
-    entries: Arc<DashMap<String, Bytes>>,
+    pub entries: Arc<DashMap<String, Bytes>>,
     expirations: Arc<DashMap<String, Instant>>,
     pub_sub: Arc<DashMap<String, broadcast::Sender<Bytes>>>,
 }
@@ -31,6 +31,12 @@ impl Db {
             self.expirations.insert(key, expiry);
         } else {
             self.expirations.remove(&key);
+        }
+    }
+
+    pub fn bulk_insert(&self, entries: std::collections::HashMap<String, Bytes>) {
+        for (key, value) in entries {
+            self.entries.insert(key, value);
         }
     }
 

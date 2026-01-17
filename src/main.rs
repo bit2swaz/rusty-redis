@@ -2,6 +2,7 @@ mod frame;
 mod connection;
 mod db;
 mod cmd;
+mod persistence;
 
 use connection::Connection;
 use frame::Frame;
@@ -22,6 +23,28 @@ async fn main() {
 
     let addr = "127.0.0.1:6379";
     let db = Db::new();
+
+    let dump_file = "dump.rdb";
+    match tokio::fs::try_exists(dump_file).await {
+        Ok(true) => {
+            match persistence::load(dump_file).await {
+                Ok(entries) => {
+                    let count = entries.len();
+                    db.bulk_insert(entries);
+                    info!("loaded {} keys from disk", count);
+                }
+                Err(e) => {
+                    error!("failed to load dump file: {}", e);
+                }
+            }
+        }
+        Ok(false) => {
+            info!("no dump file found, starting with empty database");
+        }
+        Err(e) => {
+            error!("failed to check for dump file: {}", e);
+        }
+    }
 
     let listener = match TcpListener::bind(addr).await {
         Ok(listener) => {
@@ -82,6 +105,27 @@ async fn main() {
                                         if let Err(e) = connection.write_frame(&response).await {
                                             error!("failed to write response: {}", e);
                                             break;
+                                        }
+                                    }
+                                    Command::Save => {
+                                        let db_clone = db.clone();
+                                        match persistence::save(&db_clone, "dump.rdb").await {
+                                            Ok(_) => {
+                                                info!("database saved to disk");
+                                                let response = Frame::Simple("OK".to_string());
+                                                if let Err(e) = connection.write_frame(&response).await {
+                                                    error!("failed to write response: {}", e);
+                                                    break;
+                                                }
+                                            }
+                                            Err(e) => {
+                                                error!("failed to save database: {}", e);
+                                                let response = Frame::Error(format!("ERR {}", e));
+                                                if let Err(e) = connection.write_frame(&response).await {
+                                                    error!("failed to write response: {}", e);
+                                                    break;
+                                                }
+                                            }
                                         }
                                     }
                                     Command::Subscribe { channel } => {
