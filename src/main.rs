@@ -46,33 +46,109 @@ async fn main() {
                     while let Ok(Some(frame)) = connection.read_frame().await {
                         info!("received frame: {:?}", frame);
 
-                        let response = match cmd::from_frame(frame) {
+                        match cmd::from_frame(frame) {
                             Ok(command) => {
                                 info!("parsed command: {:?}", command);
                                 match command {
-                                    Command::Ping => Frame::Simple("PONG".to_string()),
+                                    Command::Ping => {
+                                        let response = Frame::Simple("PONG".to_string());
+                                        if let Err(e) = connection.write_frame(&response).await {
+                                            error!("failed to write response: {}", e);
+                                            break;
+                                        }
+                                    }
                                     Command::Set { key, value, expiry_seconds } => {
                                         let duration = expiry_seconds.map(std::time::Duration::from_secs);
                                         db.set(key, value, duration);
-                                        Frame::Simple("OK".to_string())
+                                        let response = Frame::Simple("OK".to_string());
+                                        if let Err(e) = connection.write_frame(&response).await {
+                                            error!("failed to write response: {}", e);
+                                            break;
+                                        }
                                     }
                                     Command::Get { key } => {
-                                        match db.get(&key) {
+                                        let response = match db.get(&key) {
                                             Some(value) => Frame::Bulk(value),
                                             None => Frame::Null,
+                                        };
+                                        if let Err(e) = connection.write_frame(&response).await {
+                                            error!("failed to write response: {}", e);
+                                            break;
                                         }
+                                    }
+                                    Command::Publish { channel, message } => {
+                                        let num_receivers = db.publish(channel, message);
+                                        let response = Frame::Integer(num_receivers as i64);
+                                        if let Err(e) = connection.write_frame(&response).await {
+                                            error!("failed to write response: {}", e);
+                                            break;
+                                        }
+                                    }
+                                    Command::Subscribe { channel } => {
+                                        let confirmation = Frame::Array(vec![
+                                            Frame::Bulk("subscribe".into()),
+                                            Frame::Bulk(channel.clone().into()),
+                                            Frame::Integer(1),
+                                        ]);
+                                        if let Err(e) = connection.write_frame(&confirmation).await {
+                                            error!("failed to write subscription confirmation: {}", e);
+                                            break;
+                                        }
+
+                                        let mut rx = db.subscribe(channel.clone());
+                                        
+                                        loop {
+                                            tokio::select! {
+                                                result = rx.recv() => {
+                                                    match result {
+                                                        Ok(msg) => {
+                                                            let message_frame = Frame::Array(vec![
+                                                                Frame::Bulk("message".into()),
+                                                                Frame::Bulk(channel.clone().into()),
+                                                                Frame::Bulk(msg),
+                                                            ]);
+                                                            if let Err(e) = connection.write_frame(&message_frame).await {
+                                                                error!("failed to write message: {}", e);
+                                                                break;
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            error!("broadcast channel error: {}", e);
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+
+                                                result = connection.read_frame() => {
+                                                    match result {
+                                                        Ok(Some(_frame)) => {
+                                                            info!("client sent command in subscription mode, exiting");
+                                                            break;
+                                                        }
+                                                        Ok(None) => {
+                                                            info!("client disconnected");
+                                                            break;
+                                                        }
+                                                        Err(e) => {
+                                                            error!("error reading frame: {}", e);
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        break;
                                     }
                                 }
                             }
                             Err(e) => {
                                 error!("parse error: {}", e);
-                                Frame::Error(format!("ERR {}", e))
+                                let response = Frame::Error(format!("ERR {}", e));
+                                if let Err(e) = connection.write_frame(&response).await {
+                                    error!("failed to write response: {}", e);
+                                    break;
+                                }
                             }
-                        };
-
-                        if let Err(e) = connection.write_frame(&response).await {
-                            error!("failed to write response: {}", e);
-                            break;
                         }
                     }
 

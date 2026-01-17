@@ -6,6 +6,8 @@ pub enum Command {
     Get { key: String },
     Set { key: String, value: Bytes, expiry_seconds: Option<u64> },
     Ping,
+    Subscribe { channel: String },
+    Publish { channel: String, message: Bytes },
 }
 
 #[derive(Debug)]
@@ -102,6 +104,39 @@ pub fn from_frame(frame: Frame) -> Result<Command, ParseError> {
                     }
 
                     Ok(Command::Set { key, value, expiry_seconds })
+                }
+                "SUBSCRIBE" => {
+                    if frames.len() != 2 {
+                        return Err(ParseError::InvalidFormat(
+                            "SUBSCRIBE requires exactly 1 argument".to_string()
+                        ));
+                    }
+
+                    let channel = match &frames[1] {
+                        Frame::Bulk(bytes) => String::from_utf8_lossy(bytes).to_string(),
+                        _ => return Err(ParseError::InvalidFormat("channel must be bulk string".to_string())),
+                    };
+
+                    Ok(Command::Subscribe { channel })
+                }
+                "PUBLISH" => {
+                    if frames.len() != 3 {
+                        return Err(ParseError::InvalidFormat(
+                            "PUBLISH requires exactly 2 arguments".to_string()
+                        ));
+                    }
+
+                    let channel = match &frames[1] {
+                        Frame::Bulk(bytes) => String::from_utf8_lossy(bytes).to_string(),
+                        _ => return Err(ParseError::InvalidFormat("channel must be bulk string".to_string())),
+                    };
+
+                    let message = match &frames[2] {
+                        Frame::Bulk(bytes) => bytes.clone(),
+                        _ => return Err(ParseError::InvalidFormat("message must be bulk string".to_string())),
+                    };
+
+                    Ok(Command::Publish { channel, message })
                 }
                 _ => Err(ParseError::InvalidCommand(format!("unknown command '{}'", cmd_name))),
             }

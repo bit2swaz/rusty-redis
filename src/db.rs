@@ -2,12 +2,14 @@ use bytes::Bytes;
 use dashmap::DashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::broadcast;
 use tracing::debug;
 
 #[derive(Clone)]
 pub struct Db {
     entries: Arc<DashMap<String, Bytes>>,
     expirations: Arc<DashMap<String, Instant>>,
+    pub_sub: Arc<DashMap<String, broadcast::Sender<Bytes>>>,
 }
 
 impl Db {
@@ -15,6 +17,7 @@ impl Db {
         let db = Db {
             entries: Arc::new(DashMap::new()),
             expirations: Arc::new(DashMap::new()),
+            pub_sub: Arc::new(DashMap::new()),
         };
         db.start_eviction_task();
         db
@@ -79,5 +82,24 @@ impl Db {
                 }
             }
         });
+    }
+
+    pub fn subscribe(&self, channel: String) -> broadcast::Receiver<Bytes> {
+        self.pub_sub
+            .entry(channel)
+            .or_insert_with(|| {
+                let (tx, _rx) = broadcast::channel(32);
+                tx
+            })
+            .value()
+            .subscribe()
+    }
+
+    pub fn publish(&self, channel: String, msg: Bytes) -> usize {
+        if let Some(tx) = self.pub_sub.get(&channel) {
+            tx.send(msg).unwrap_or(0)
+        } else {
+            0
+        }
     }
 }
