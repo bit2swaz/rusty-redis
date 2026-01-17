@@ -9,6 +9,7 @@ pub enum Command {
     Subscribe { channel: String },
     Publish { channel: String, message: Bytes },
     Save,
+    Del { key: String },
 }
 
 #[derive(Debug)]
@@ -146,6 +147,20 @@ pub fn from_frame(frame: Frame) -> Result<Command, ParseError> {
                         ));
                     }
                     Ok(Command::Save)
+                }
+                "DEL" => {
+                    if frames.len() != 2 {
+                        return Err(ParseError::InvalidFormat(
+                            "DEL requires exactly 1 argument".to_string()
+                        ));
+                    }
+
+                    let key = match &frames[1] {
+                        Frame::Bulk(bytes) => String::from_utf8_lossy(bytes).to_string(),
+                        _ => return Err(ParseError::InvalidFormat("key must be bulk string".to_string())),
+                    };
+
+                    Ok(Command::Del { key })
                 }
                 _ => Err(ParseError::InvalidCommand(format!("unknown command '{}'", cmd_name))),
             }

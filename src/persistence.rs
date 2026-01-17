@@ -24,7 +24,10 @@ pub async fn save(db: &Db, filename: &str) -> io::Result<()> {
     let serialized = bincode::serialize(&snapshot)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-    fs::write(filename, serialized).await?;
+    let temp_file = format!("{}.tmp", filename);
+    fs::write(&temp_file, serialized).await?;
+
+    fs::rename(&temp_file, filename).await?;
 
     Ok(())
 }

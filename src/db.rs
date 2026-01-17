@@ -1,15 +1,17 @@
 use bytes::Bytes;
 use dashmap::DashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
-use tracing::debug;
+use tracing::{debug, info, error};
 
 #[derive(Clone)]
 pub struct Db {
     pub entries: Arc<DashMap<String, Bytes>>,
     expirations: Arc<DashMap<String, Instant>>,
     pub_sub: Arc<DashMap<String, broadcast::Sender<Bytes>>>,
+    changed: Arc<AtomicBool>,
 }
 
 impl Db {
@@ -18,13 +20,16 @@ impl Db {
             entries: Arc::new(DashMap::new()),
             expirations: Arc::new(DashMap::new()),
             pub_sub: Arc::new(DashMap::new()),
+            changed: Arc::new(AtomicBool::new(false)),
         };
         db.start_eviction_task();
+        db.start_snapshot_task();
         db
     }
 
     pub fn set(&self, key: String, value: Bytes, duration: Option<Duration>) {
         self.entries.insert(key.clone(), value);
+        self.changed.store(true, Ordering::Relaxed);
         
         if let Some(dur) = duration {
             let expiry = Instant::now() + dur;
@@ -51,6 +56,15 @@ impl Db {
         }
         
         self.entries.get(key).map(|entry| entry.value().clone())
+    }
+
+    pub fn del(&self, key: &str) -> bool {
+        let removed = self.entries.remove(key).is_some();
+        if removed {
+            self.changed.store(true, Ordering::Relaxed);
+        }
+        self.expirations.remove(key);
+        removed
     }
 
     fn start_eviction_task(&self) {
@@ -107,5 +121,39 @@ impl Db {
         } else {
             0
         }
+    }
+
+    fn start_snapshot_task(&self) {
+        let changed = Arc::clone(&self.changed);
+        let entries = Arc::clone(&self.entries);
+        let expirations = Arc::clone(&self.expirations);
+        let pub_sub = Arc::clone(&self.pub_sub);
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            
+            loop {
+                interval.tick().await;
+                
+                if changed.swap(false, Ordering::Relaxed) {
+                    let snapshot_db = Db {
+                        entries: Arc::clone(&entries),
+                        expirations: Arc::clone(&expirations),
+                        pub_sub: Arc::clone(&pub_sub),
+                        changed: Arc::clone(&changed),
+                    };
+                    
+                    match crate::persistence::save(&snapshot_db, "dump.rdb").await {
+                        Ok(_) => {
+                            let count = snapshot_db.entries.len();
+                            info!("auto-saved {} keys to disk", count);
+                        }
+                        Err(e) => {
+                            error!("auto-save failed: {}", e);
+                        }
+                    }
+                }
+            }
+        });
     }
 }

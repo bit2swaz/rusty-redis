@@ -99,6 +99,14 @@ async fn main() {
                                             break;
                                         }
                                     }
+                                    Command::Del { key } => {
+                                        let deleted = db.del(&key);
+                                        let response = Frame::Integer(if deleted { 1 } else { 0 });
+                                        if let Err(e) = connection.write_frame(&response).await {
+                                            error!("failed to write response: {}", e);
+                                            break;
+                                        }
+                                    }
                                     Command::Publish { channel, message } => {
                                         let num_receivers = db.publish(channel, message);
                                         let response = Frame::Integer(num_receivers as i64);
