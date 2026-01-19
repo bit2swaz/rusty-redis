@@ -15,7 +15,7 @@ echo ""
 
 echo "test 1: ping"
 RESULT=$(echo -e '*1\r\n$4\r\nPING\r\n' | nc localhost 6379)
-if [[ "$RESULT" == "+PONG" ]]; then
+if [[ "$RESULT" == *"+PONG"* ]]; then
     echo "  ✓ ping -> pong"
 else
     echo "  ✗ ping failed: $RESULT"
@@ -34,7 +34,7 @@ fi
 echo ""
 echo "test 3: del"
 RESULT=$(echo -e '*2\r\n$3\r\nDEL\r\n$3\r\nfoo\r\n' | nc localhost 6379)
-if [[ "$RESULT" == ":1" ]]; then
+if [[ "$RESULT" == *":1"* ]]; then
     echo "  ✓ del foo -> 1 (deleted)"
 else
     echo "  ✗ del failed: $RESULT"

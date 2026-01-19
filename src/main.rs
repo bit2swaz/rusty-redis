@@ -57,6 +57,28 @@ async fn main() {
         }
     };
 
+    let db_for_shutdown = db.clone();
+    tokio::spawn(async move {
+        match tokio::signal::ctrl_c().await {
+            Ok(()) => {
+                info!("received shutdown signal, saving database...");
+                match persistence::save(&db_for_shutdown, "dump.rdb").await {
+                    Ok(_) => {
+                        let count = db_for_shutdown.entries.len();
+                        info!("saved {} keys to disk", count);
+                    }
+                    Err(e) => {
+                        error!("failed to save on shutdown: {}", e);
+                    }
+                }
+                std::process::exit(0);
+            }
+            Err(e) => {
+                error!("failed to listen for shutdown signal: {}", e);
+            }
+        }
+    });
+
     loop {
         match listener.accept().await {
             Ok((socket, peer_addr)) => {
