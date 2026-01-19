@@ -6,6 +6,8 @@ a high-performance, concurrent in-memory key-value store implementing the redis 
 
 rusty-redis is a redis-compatible server built with async rust. unlike single-threaded redis, it uses tokio's async runtime and dashmap's lock-free concurrent hashmap to handle thousands of connections across multiple cpu cores without global locks.
 
+_for a deep dive, feel free to read [this blog](https://bit2-blog.vercel.app/posts/rusty-redis-deep-dive) written by me_
+
 ## features
 
 - **resp v2 protocol**: compatible with redis-cli and standard client libraries
